@@ -1,0 +1,22 @@
+# Docker Compose 파일 형식 버전
+version: '3'
+
+services:
+  # FastAPI 백엔드 API 서버
+  backend:
+    build: ./backend
+    container_name: mk-dashboard-backend
+    ports:
+      - "8000:8000"  # 호스트:컨테이너 (localhost:8000으로 API 접근)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  # Docker API 호출용 (컨테이너/이미지 목록 등)
+      - /service:/service:ro  # 서비스 디렉토리 마운트 (읽기 전용)
+
+  # 정적 웹 프론트엔드 (Nginx)
+  frontend:
+    image: nginx:alpine
+    container_name: mk-dashboard-frontend
+    ports:
+      - "82:80"  # 호스트 82 → Nginx 80 (외부 포트 82 사용)
+    volumes:
+      - ./frontend:/usr/share/nginx/html  # 프론트엔드 파일을 Nginx 기본 문서 경로에 마운트

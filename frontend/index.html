@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>Docker Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1> Docker Dashboard</h1>
+
+    <h2>📁 파일 탐색기</h2>
+    <div class="file-explorer-wrap">
+        <div class="file-explorer-pane">
+            <div id="breadcrumb"></div>
+            <table id="files">
+                <tr><th>이름</th><th>종류</th></tr>
+            </table>
+        </div>
+        <div class="file-preview-pane">
+            <h3>파일 미리보기</h3>
+            <div id="filePreviewContent" class="file-preview-placeholder">파일을 선택하면 내용이 여기에 표시됩니다.</div>
+        </div>
+    </div>
+
+    <h2>컨테이너</h2>
+    <div class="filter-row">
+        <label for="filterName">컨테이너 이름</label>
+        <select id="filterName">
+            <option value="">전체</option>
+            <option value="sj">sj</option>
+            <option value="mk">mk</option>
+            <option value="jh">jh</option>
+        </select>
+    </div>
+    <table id="containers">
+        <tr><th>ID</th><th>이름</th><th>이미지</th><th>포트</th><th>볼륨</th><th>상태</th><th>동작</th></tr>
+    </table>
+
+    <script>
+        const API = "http://192.168.50.187:8000";
+        let allContainers = [];
+        let images = [];
+        let currentPath = "/service";
+
+        function renderRows(containers) {
+            const table = document.getElementById("containers");
+            const existingDataRows = table.querySelectorAll("tr:not(:first-child)");
+            existingDataRows.forEach(tr => tr.remove());
+
+            containers.forEach(c => {
+                const img = images.find(i => i.tags && i.tags.includes(c.image));
+                const tooltipHtml = img
+                    ? `<div class="tooltip">ID: ${img.id}<br>태그: ${(img.tags || []).join(", ") || "none"}<br>크기: ${img.size} MB</div>`
+                    : "";
+                const portStr = formatPorts(c.ports);
+                const mountsStr = formatMounts(c.mounts);
+                const row = table.insertRow();
+                row.className = "container-row";
+                row.dataset.containerId = c.id;
+                const isRunning = c.status === "running";
+                row.innerHTML = `
+                    <td>${c.id}</td>
+                    <td>${c.name}</td>
+                    <td class="image-cell">${c.image}${tooltipHtml}</td>
+                    <td>${portStr}</td>
+                    <td>${mountsStr}</td>
+                    <td class="${c.status}">${c.status}</td>
+                    <td class="actions-cell">
+                        <button type="button" class="btn-start" ${isRunning ? "disabled" : ""}>실행</button>
+                        <button type="button" class="btn-stop" ${!isRunning ? "disabled" : ""}>정지</button>
+                    </td>
+                `;
+                row.style.cursor = "pointer";
+                row.addEventListener("click", () => toggleContainerLog(row, c.id));
+                row.querySelector(".btn-start").addEventListener("click", (e) => { e.stopPropagation(); startContainer(c.id); });
+                row.querySelector(".btn-stop").addEventListener("click", (e) => { e.stopPropagation(); stopContainer(c.id); });
+            });
+        }
+
+        function removeLogRow() {
+            document.querySelectorAll("#containers .container-log-row").forEach(tr => tr.remove());
+            document.querySelectorAll("#containers .container-row.expanded").forEach(r => r.classList.remove("expanded"));
+        }
+
+        async function toggleContainerLog(row, containerId) {
+            const next = row.nextElementSibling;
+            if (next && next.classList.contains("container-log-row")) {
+                next.remove();
+                row.classList.remove("expanded");
+                return;
+            }
+            removeLogRow();
+            row.classList.add("expanded");
+            const logRow = row.parentNode.insertRow(row.rowIndex + 1);
+            logRow.className = "container-log-row";
+            const cell = logRow.insertCell(0);
+            cell.colSpan = 7;
+            cell.className = "container-log-cell";
+            cell.innerHTML = '<span class="container-log-loading">로그 불러오는 중...</span>';
+
+            try {
+                const res = await fetch(`${API}/containers/${containerId}/logs?lines=10`);
+                const data = await res.json();
+                if (data.error) {
+                    cell.innerHTML = `<span class="container-log-error">${data.error}</span>`;
+                    return;
+                }
+                const lines = (data.logs || "").trim() || "(로그 없음)";
+                cell.innerHTML = `<pre class="container-log-pre">${escapeHtml(lines)}</pre>`;
+            } catch (e) {
+                cell.innerHTML = `<span class="container-log-error">요청 실패: ${e.message}</span>`;
+            }
+        }
+
+        function escapeHtml(s) {
+            return String(s)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;");
+        }
+
+        function formatPorts(ports) {
+            if (!ports || typeof ports !== "object") return "—";
+            const parts = [];
+            for (const [containerPort, bindings] of Object.entries(ports)) {
+                if (bindings && bindings.length > 0 && bindings[0].HostPort) {
+                    parts.push(`${containerPort}→${bindings[0].HostPort}`);
+                } else {
+                    parts.push(containerPort);
+                }
+            }
+            return parts.length ? parts.join(", ") : "—";
+        }
+
+        function formatMounts(mounts) {
+            if (!mounts || !Array.isArray(mounts) || mounts.length === 0) return "—";
+            return mounts.map(m => `${m.source || "?"} → ${m.destination || "?"}`).join("<br>");
+        }
+
+        async function startContainer(containerId) {
+            try {
+                const res = await fetch(`${API}/containers/${containerId}/start`, { method: "POST" });
+                const data = await res.json();
+                if (data.error) {
+                    alert("실행 실패: " + data.error);
+                    return;
+                }
+                loadContainers();
+            } catch (e) {
+                alert("요청 실패: " + e.message);
+            }
+        }
+
+        async function stopContainer(containerId) {
+            try {
+                const res = await fetch(`${API}/containers/${containerId}/stop`, { method: "POST" });
+                const data = await res.json();
+                if (data.error) {
+                    alert("정지 실패: " + data.error);
+                    return;
+                }
+                loadContainers();
+            } catch (e) {
+                alert("요청 실패: " + e.message);
+            }
+        }
+
+        function applyFilter() {
+            const value = document.getElementById("filterName").value;
+            let list = allContainers;
+            if (value === "sj") {
+                list = allContainers.filter(c => c.name.includes("sj"));
+            } else if (value === "mk") {
+                list = allContainers.filter(c => c.name.includes("mk") || c.name.includes("minkyung"));
+            } else if (value === "jh") {
+                list = allContainers.filter(c => c.name.includes("jh"));
+            }
+            renderRows(list);
+        }
+
+        async function loadContainers() {
+            const [containersRes, imagesRes] = await Promise.all([
+                fetch(`${API}/containers`),
+                fetch(`${API}/images`)
+            ]);
+            allContainers = await containersRes.json();
+            images = await imagesRes.json();
+
+            document.getElementById("filterName").addEventListener("change", applyFilter);
+            applyFilter();
+        }
+
+        async function loadFiles(path) {
+            currentPath = path;
+            selectFileRow(null);
+            document.getElementById("filePreviewContent").className = "file-preview-placeholder";
+            document.getElementById("filePreviewContent").textContent = "파일을 선택하면 내용이 여기에 표시됩니다.";
+
+            const res = await fetch(`${API}/files?path=${encodeURIComponent(path)}`);
+            const data = await res.json();
+
+            document.getElementById("breadcrumb").innerHTML = path;
+
+            const table = document.getElementById("files");
+            table.innerHTML = "<tr><th>이름</th><th>종류</th></tr>";
+
+            if (path !== "/service") {
+                const parent = path.split("/").slice(0, -1).join("/") || "/service";
+                const row = table.insertRow();
+                row.style.cursor = "pointer";
+                row.onclick = () => loadFiles(parent);
+                row.innerHTML = "<td> < </td><td></td>";
+            }
+
+            if (data.items) {
+                data.items.forEach(item => {
+                    const row = table.insertRow();
+                    if (item.is_dir) {
+                        row.style.cursor = "pointer";
+                        row.onclick = () => loadFiles(item.path);
+                    } else {
+                        row.className = "row-file";
+                        row.onclick = (e) => {
+                            e.stopPropagation();
+                            selectFileRow(row);
+                            loadFilePreview(item.path);
+                        };
+                    }
+                    row.innerHTML = `
+                        <td>${item.is_dir ? "📁" : "📄"} ${item.name}</td>
+                        <td>${item.is_dir ? "폴더" : "파일"}</td>
+                    `;
+                });
+            }
+        }
+
+        function selectFileRow(selectedRow) {
+            document.querySelectorAll("#files .row-file.selected").forEach(r => r.classList.remove("selected"));
+            if (selectedRow) selectedRow.classList.add("selected");
+        }
+
+        async function loadFilePreview(path) {
+            const el = document.getElementById("filePreviewContent");
+            el.className = "file-preview-content";
+            el.textContent = "불러오는 중...";
+
+            try {
+                const res = await fetch(`${API}/file-content?path=${encodeURIComponent(path)}`);
+                const data = await res.json();
+
+                if (data.error) {
+                    el.className = "file-preview-content error";
+                    el.textContent = data.error;
+                    return;
+                }
+                el.className = "file-preview-content";
+                el.textContent = data.content || "(비어 있음)";
+            } catch (e) {
+                el.className = "file-preview-content error";
+                el.textContent = "요청 실패: " + e.message;
+            }
+        }
+
+        loadContainers();
+        loadFiles("/service");
+    </script>
+</body>
+</html>
