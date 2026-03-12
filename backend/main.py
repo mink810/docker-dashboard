@@ -16,7 +16,7 @@ client = docker.from_env()
 
 @app.get("/containers")
 def get_containers():
-    containers = client.containers.list(all=True)
+    containers = client.containers.list(all=True)   # 모든 컨테이너 목록 조회
     return [
         {
             "id": c.short_id,
