@@ -13,6 +13,8 @@ spec:
       labels:
         app: mk-dashboard-backend
     spec:
+      imagePullSecrets:
+      - name: harbor-secret
       containers:
       - name: backend
         image: harbor.192.168.50.201.nip.io:30443/library/mk-dashboard-backend:latest
