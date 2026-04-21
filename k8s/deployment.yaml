@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mk-dashboard-backend
+  namespace: mk-dashboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mk-dashboard-backend
+  template:
+    metadata:
+      labels:
+        app: mk-dashboard-backend
+    spec:
+      containers:
+      - name: backend
+        image: harbor.192.168.50.201.nip.io:30443/library/mk-dashboard-backend:latest
+        ports:
+        - containerPort: 8000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mk-dashboard-backend
+  namespace: mk-dashboard
+spec:
+  selector:
+    app: mk-dashboard-backend
+  ports:
+  - port: 8000
+    targetPort: 8000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mk-dashboard-ingress
+  namespace: mk-dashboard
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: mk-dashboard.192.168.50.201.nip.io
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: mk-dashboard-backend
+            port:
+              number: 8000
