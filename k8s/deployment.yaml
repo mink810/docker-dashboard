@@ -20,6 +20,13 @@ spec:
         image: harbor.192.168.50.201.nip.io:30443/library/mk-dashboard-backend:latest
         ports:
         - containerPort: 8000
+        volumeMounts:
+        - name: docker-sock
+          mountPath: /var/run/docker.sock
+      volumes:
+      - name: docker-sock
+        hostPath:
+          path: /var/run/docker.sock
 ---
 apiVersion: v1
 kind: Service
